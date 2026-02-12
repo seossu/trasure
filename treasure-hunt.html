@@ -69,16 +69,12 @@
         .step-counter { font-size: 0.8rem; color: #aaa; }
         .step-counter span { color: #f5af19; font-weight: bold; }
 
-        /* 1인칭 뷰 영역 */
+        /* 포켓몬GO 뷰 영역 */
         .fpv-container {
             position: relative; flex: 1; min-height: 0;
-            background: #0a0a1a; overflow: hidden;
+            background: #87CEEB; overflow: hidden;
         }
         #fpvCanvas { width: 100%; height: 100%; display: block; }
-        .fpv-overlay {
-            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            pointer-events: none; z-index: 5;
-        }
 
         /* 심박 테두리 */
         .fpv-heartbeat {
@@ -101,24 +97,33 @@
         }
         @keyframes pulseGlow { 0% { transform: translate(-50%,-50%) scale(0.8); opacity: 0.5; } 100% { transform: translate(-50%,-50%) scale(1.3); opacity: 1; } }
 
-        /* 거리 텍스트 (1인칭 뷰 위) */
+        /* 거리 텍스트 (뷰 위) */
         .fpv-distance {
             position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
             z-index: 8; text-align: center; pointer-events: none;
-            background: rgba(0,0,0,0.6); backdrop-filter: blur(8px);
+            background: rgba(0,0,0,0.55); backdrop-filter: blur(8px);
             padding: 8px 20px; border-radius: 20px; font-size: 1.1rem; font-weight: bold;
-            white-space: nowrap;
+            white-space: nowrap; color: #fff;
         }
+
+        /* Nearby 트래커 */
+        .nearby-tracker {
+            position: absolute; bottom: 60px; right: 12px; z-index: 8; pointer-events: none;
+            background: rgba(255,255,255,0.9); border-radius: 12px; padding: 8px 12px;
+            color: #333; font-size: 0.75rem; box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            display: none;
+        }
+        .nearby-tracker.show { display: block; }
+        .nearby-tracker .tracker-title { font-weight: bold; font-size: 0.65rem; color: #888; margin-bottom: 4px; }
+        .nearby-tracker .tracker-icon { font-size: 1.4rem; }
+        .nearby-tracker .tracker-feet { display: flex; gap: 2px; margin-top: 2px; }
+        .nearby-tracker .foot { font-size: 0.55rem; }
 
         /* 구분선 */
-        .divider {
-            height: 4px; background: #f5af19; flex-shrink: 0;
-        }
+        .divider { height: 4px; background: #4FC3F7; flex-shrink: 0; }
 
         /* 하단: 지도 + HUD */
-        .map-section {
-            position: relative; height: 35vh; flex-shrink: 0;
-        }
+        .map-section { position: relative; height: 35vh; flex-shrink: 0; }
         #map { width: 100%; height: 100%; }
 
         /* 걷기 인디케이터 */
@@ -198,11 +203,6 @@
             font-size: 1.5rem; animation: fall 2s ease-in forwards;
         }
         @keyframes fall { 0%{opacity:1;transform:translateY(0) rotate(0)} 100%{opacity:0;transform:translateY(100vh) rotate(720deg)} }
-
-        .temp-hot { color: #e74c3c; }
-        .temp-warm { color: #f39c12; }
-        .temp-cool { color: #3498db; }
-        .temp-cold { color: #2980b9; }
     </style>
 </head>
 <body>
@@ -225,7 +225,6 @@
 
 <!-- ====== 게임 화면 ====== -->
 <div id="gameView">
-    <!-- 헤더 -->
     <div class="game-header">
         <button class="back-btn" onclick="goBack()">← 로비</button>
         <h2 id="mapTitle">플레이어 1</h2>
@@ -234,15 +233,19 @@
         </div>
     </div>
 
-    <!-- 1인칭 뷰 (상단) -->
+    <!-- 포켓몬GO 스타일 뷰 (상단) -->
     <div class="fpv-container" id="fpvContainer">
         <canvas id="fpvCanvas"></canvas>
         <div class="fpv-heartbeat" id="fpvHeartbeat"></div>
         <div class="fpv-glow" id="fpvGlow"></div>
         <div class="fpv-distance" id="fpvDistance">지도를 클릭하여 탐험을 시작하세요</div>
+        <div class="nearby-tracker" id="nearbyTracker">
+            <div class="tracker-title">NEARBY</div>
+            <div class="tracker-icon" id="trackerIcon">❓</div>
+            <div class="tracker-feet" id="trackerFeet"></div>
+        </div>
     </div>
 
-    <!-- 구분선 -->
     <div class="divider"></div>
 
     <!-- 지도 (하단) -->
@@ -307,34 +310,21 @@ let players = Array.from({length: 4}, () => ({ found: false, treasure: null }));
 let currentPlayer = null;
 
 // Leaflet
-let map = null;
-let playerMarker = null;
-let treasureMarker = null;
-let radiusCircle = null;
-let hintCircle = null;
-let pathLine = null;
-let footprints = [];
+let map = null, playerMarker = null, treasureMarker = null;
+let radiusCircle = null, hintCircle = null, pathLine = null, footprints = [];
 
 // 걷기
-let playerPos = null;
-let walkAnimation = null;
-let isWalking = false;
-let stepCount = 0;
-let lastBearing = 0;
+let playerPos = null, walkAnimation = null, isWalking = false;
+let stepCount = 0, lastBearing = 0;
 
-// 1인칭 뷰 (캔버스)
-let fpvCanvas = null;
-let fpvCtx = null;
-let fpvAnimFrame = null;
-let fpvTime = 0;
-let fpvWalking = false;
-let fpvBearing = 0;
-let fpvDistance = 9999;
-let fpvFound = false;
-// 지형 요소 (나무, 건물 등)
+// 포켓몬GO 뷰 (캔버스)
+let fpvCanvas = null, fpvCtx = null, fpvAnimFrame = null;
+let fpvTime = 0, fpvWalking = false, fpvBearing = 0;
+let fpvDistance = 9999, fpvFound = false;
+let fpvWorldOffset = 0;  // 월드 스크롤
 let fpvObjects = [];
+let fpvClouds = [];
 
-// 보물 위치 초기화
 initTreasures();
 
 // ═══════════════════════════════════════
@@ -345,7 +335,6 @@ function getDistance(lat1, lng1, lat2, lng2) {
     const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
-
 function getBearing(lat1, lng1, lat2, lng2) {
     const dLng = (lng2-lng1)*Math.PI/180;
     const y = Math.sin(dLng)*Math.cos(lat2*Math.PI/180);
@@ -353,42 +342,49 @@ function getBearing(lat1, lng1, lat2, lng2) {
               Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos(dLng);
     return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
 }
-
 function lerpLatLng(a, b, t) { return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t]; }
-
 function randomCampusLocation() {
     return [
         CAMPUS_BOUNDS.latMin + Math.random()*(CAMPUS_BOUNDS.latMax - CAMPUS_BOUNDS.latMin),
         CAMPUS_BOUNDS.lngMin + Math.random()*(CAMPUS_BOUNDS.lngMax - CAMPUS_BOUNDS.lngMin)
     ];
 }
-
 function initTreasures() {
     for (let i = 0; i < 4; i++) players[i].treasure = randomCampusLocation();
 }
 
 // ═══════════════════════════════════════
-//  1인칭 뷰 (캔버스 렌더링)
+//  포켓몬GO 스타일 캔버스 렌더링
 // ═══════════════════════════════════════
 function initFPV() {
     fpvCanvas = document.getElementById('fpvCanvas');
     fpvCtx = fpvCanvas.getContext('2d');
-    fpvTime = 0;
-    fpvWalking = false;
-    fpvFound = false;
-    fpvDistance = 9999;
+    fpvTime = 0; fpvWalking = false; fpvFound = false;
+    fpvDistance = 9999; fpvWorldOffset = 0;
 
-    // 랜덤 지형 객체 생성 (나무, 건물, 가로등)
+    // 지형 객체 (나무, 건물, 덤불, 꽃)
     fpvObjects = [];
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
+        const types = ['tree','tree','building','bush','bush','flower','bench','lamp'];
         fpvObjects.push({
-            type: ['tree', 'building', 'lamp', 'bush'][Math.floor(Math.random()*4)],
-            x: (Math.random() - 0.5) * 2000,   // -1000 ~ 1000
-            z: 100 + Math.random() * 800,       // 깊이
-            baseZ: 100 + Math.random() * 800,
-            color: `hsl(${Math.random()*60 + 100}, ${40+Math.random()*30}%, ${25+Math.random()*20}%)`,
-            height: 30 + Math.random() * 80,
-            width: 15 + Math.random() * 40,
+            type: types[Math.floor(Math.random()*types.length)],
+            wx: (Math.random() - 0.5) * 1200,
+            wz: Math.random() * 1000,
+            baseWz: Math.random() * 1000,
+            treeGreen: `hsl(${110 + Math.random()*40}, ${55+Math.random()*25}%, ${35+Math.random()*20}%)`,
+            h: 20 + Math.random() * 50,
+            w: 10 + Math.random() * 30,
+        });
+    }
+
+    // 구름
+    fpvClouds = [];
+    for (let i = 0; i < 6; i++) {
+        fpvClouds.push({
+            x: Math.random() * 1200 - 100,
+            y: 20 + Math.random() * 60,
+            w: 60 + Math.random() * 100,
+            speed: 8 + Math.random() * 15,
         });
     }
 
@@ -399,10 +395,10 @@ function initFPV() {
 
 function resizeFPV() {
     if (!fpvCanvas) return;
-    const container = document.getElementById('fpvContainer');
-    fpvCanvas.width = container.clientWidth * window.devicePixelRatio;
-    fpvCanvas.height = container.clientHeight * window.devicePixelRatio;
-    fpvCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    const c = document.getElementById('fpvContainer');
+    fpvCanvas.width = c.clientWidth * window.devicePixelRatio;
+    fpvCanvas.height = c.clientHeight * window.devicePixelRatio;
+    fpvCtx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
 }
 
 function renderFPV() {
@@ -410,349 +406,438 @@ function renderFPV() {
     const W = fpvCanvas.width / window.devicePixelRatio;
     const H = fpvCanvas.height / window.devicePixelRatio;
     const ctx = fpvCtx;
-
     ctx.clearRect(0, 0, W, H);
     fpvTime += 0.016;
 
-    // 걸을 때 화면 흔들림
-    let shakeX = 0, shakeY = 0;
-    if (fpvWalking) {
-        shakeX = Math.sin(fpvTime * 8) * 3;
-        shakeY = Math.abs(Math.sin(fpvTime * 16)) * 4;
-    }
+    // 걷기 → 월드 스크롤
+    if (fpvWalking) fpvWorldOffset += 3;
 
-    ctx.save();
-    ctx.translate(shakeX, shakeY);
+    // 캐릭터 걸음 바운스
+    const bobY = fpvWalking ? Math.sin(fpvTime * 10) * 4 : 0;
+    const bobX = fpvWalking ? Math.sin(fpvTime * 5) * 1.5 : 0;
 
-    // ── 하늘 (그라데이션) ──
-    const horizonY = H * 0.42;
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
-    if (fpvDistance < 100) {
-        // 가까우면 하늘이 붉어짐
-        const intensity = Math.max(0, 1 - fpvDistance / 100);
-        skyGrad.addColorStop(0, `rgba(${30 + intensity*100}, ${10 + intensity*20}, ${60 - intensity*40}, 1)`);
-        skyGrad.addColorStop(1, `rgba(${40 + intensity*120}, ${30 + intensity*60}, ${80 - intensity*50}, 1)`);
-    } else {
-        skyGrad.addColorStop(0, '#0a0a2e');
-        skyGrad.addColorStop(1, '#1a1a4e');
-    }
+    // ── 하늘 ──
+    const skyH = H * 0.35;
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, skyH);
+    skyGrad.addColorStop(0, '#4FC3F7');
+    skyGrad.addColorStop(0.6, '#81D4FA');
+    skyGrad.addColorStop(1, '#B3E5FC');
     ctx.fillStyle = skyGrad;
-    ctx.fillRect(0, 0, W, horizonY);
+    ctx.fillRect(0, 0, W, skyH);
 
-    // ── 별 ──
-    ctx.fillStyle = 'rgba(255,255,255,0.6)';
-    for (let i = 0; i < 50; i++) {
-        const sx = (i * 137.5 + fpvTime * 2) % W;
-        const sy = (i * 89.3) % (horizonY - 20);
-        const brightness = 0.3 + 0.7 * Math.sin(fpvTime * 2 + i);
-        ctx.globalAlpha = brightness * 0.6;
-        ctx.fillRect(sx, sy, 1.5, 1.5);
+    // ── 구름 ──
+    for (const cl of fpvClouds) {
+        cl.x += cl.speed * 0.016;
+        if (cl.x > W + 100) cl.x = -cl.w - 50;
+        drawCloud(ctx, cl.x, cl.y, cl.w);
     }
-    ctx.globalAlpha = 1;
 
-    // ── 달 ──
-    const moonX = W * 0.8;
-    const moonY = H * 0.12;
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, 25, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(240,240,200,0.15)';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(moonX, moonY, 15, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(240,240,200,0.9)';
-    ctx.fill();
+    // ── 땅 (비스듬한 잔디밭 - 등각 투시) ──
+    // 수렴점
+    const vpX = W / 2;
+    const vpY = skyH;
 
-    // ── 땅 (원근감 있는 격자) ──
-    const groundGrad = ctx.createLinearGradient(0, horizonY, 0, H);
-    groundGrad.addColorStop(0, '#1a2a1a');
-    groundGrad.addColorStop(1, '#0d1a0d');
-    ctx.fillStyle = groundGrad;
-    ctx.fillRect(0, horizonY, W, H - horizonY);
+    // 잔디 영역
+    const grassGrad = ctx.createLinearGradient(0, vpY, 0, H);
+    grassGrad.addColorStop(0, '#66BB6A');
+    grassGrad.addColorStop(0.3, '#4CAF50');
+    grassGrad.addColorStop(1, '#388E3C');
+    ctx.fillStyle = grassGrad;
+    ctx.fillRect(0, vpY, W, H - vpY);
 
-    // 격자 라인 (원근 투시)
-    const vanishX = W / 2;
-    const vanishY = horizonY;
-    ctx.strokeStyle = 'rgba(100,160,100,0.15)';
-    ctx.lineWidth = 1;
-
-    // 방사형 라인
-    for (let i = -8; i <= 8; i++) {
-        const endX = vanishX + i * W * 0.15;
+    // 잔디 텍스처 패턴 (작은 점)
+    ctx.fillStyle = 'rgba(56,142,60,0.4)';
+    for (let i = 0; i < 120; i++) {
+        const gx = (i * 97.3 + fpvWorldOffset * 0.3) % (W + 40) - 20;
+        const t = (i * 73.7) % 100 / 100;
+        const gy = vpY + (H - vpY) * (t * t);
+        const gs = 1 + t * 3;
         ctx.beginPath();
-        ctx.moveTo(vanishX, vanishY);
-        ctx.lineTo(endX, H);
-        ctx.stroke();
+        ctx.arc(gx, gy, gs, 0, Math.PI * 2);
+        ctx.fill();
     }
 
-    // 수평 라인 (깊이감)
-    for (let i = 1; i <= 12; i++) {
-        const t = i / 12;
-        const y = vanishY + (H - vanishY) * (t * t); // 비선형 깊이감
-        ctx.globalAlpha = 0.08 + t * 0.12;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(W, y);
-        ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-
-    // ── 길 (중앙 도로) ──
+    // ── 도로 (중앙 → 수렴점) ──
+    const roadW = W * 0.14;
     ctx.beginPath();
-    ctx.moveTo(vanishX - 2, vanishY);
-    ctx.lineTo(vanishX - W * 0.18, H);
-    ctx.lineTo(vanishX + W * 0.18, H);
-    ctx.lineTo(vanishX + 2, vanishY);
+    ctx.moveTo(vpX - 3, vpY);
+    ctx.lineTo(vpX - roadW, H);
+    ctx.lineTo(vpX + roadW, H);
+    ctx.lineTo(vpX + 3, vpY);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(60,60,70,0.6)';
+    ctx.fillStyle = '#9E9E9E';
     ctx.fill();
 
-    // 도로 중앙선 (점선)
-    ctx.strokeStyle = 'rgba(245,175,25,0.4)';
+    // 도로 테두리
+    ctx.strokeStyle = '#BDBDBD';
     ctx.lineWidth = 2;
-    ctx.setLineDash([8, 12]);
-    const lineOffset = fpvWalking ? (fpvTime * 80) % 20 : 0;
-    ctx.lineDashOffset = -lineOffset;
     ctx.beginPath();
-    ctx.moveTo(vanishX, vanishY + 10);
-    ctx.lineTo(vanishX, H);
+    ctx.moveTo(vpX - 3, vpY); ctx.lineTo(vpX - roadW, H);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(vpX + 3, vpY); ctx.lineTo(vpX + roadW, H);
+    ctx.stroke();
+
+    // 도로 점선 (이동 시 흐르는 효과)
+    ctx.strokeStyle = '#FFF';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 15]);
+    ctx.lineDashOffset = -(fpvWorldOffset * 2) % 25;
+    ctx.beginPath();
+    ctx.moveTo(vpX, vpY + 5);
+    ctx.lineTo(vpX, H);
     ctx.stroke();
     ctx.setLineDash([]);
 
     // ── 지형 객체 렌더링 ──
-    // 깊이 정렬 (먼 것부터)
-    const sortedObjs = [...fpvObjects].sort((a, b) => b.z - a.z);
-    for (const obj of sortedObjs) {
-        // 걸을 때 객체가 다가오는 효과
-        if (fpvWalking) {
-            obj.z -= 2;
-            if (obj.z < 20) obj.z = obj.baseZ + 400;
-        }
+    // z 기준 이동 + 정렬
+    const renderList = [];
+    for (const obj of fpvObjects) {
+        let z = (obj.wz - fpvWorldOffset * 0.5) % 1000;
+        if (z < 0) z += 1000;
+        obj._rz = z;
+        renderList.push(obj);
+    }
+    renderList.sort((a, b) => b._rz - a._rz);
 
-        const perspective = 300 / (obj.z + 100);
-        const screenX = vanishX + obj.x * perspective;
-        const screenY = vanishY + (H - vanishY) * perspective * 1.2;
-        const scale = perspective * 2;
+    for (const obj of renderList) {
+        const z = obj._rz;
+        const depthT = z / 1000; // 0(가까움) ~ 1(먼)
+        const perspScale = 0.15 + (1 - depthT) * 0.85;
 
-        if (screenX < -100 || screenX > W + 100 || screenY < vanishY) continue;
+        // 화면 좌표 (원근 투시)
+        const screenY = vpY + (H - vpY) * (1 - depthT * depthT);
+        const centerSpread = (1 - depthT) * 1.5 + depthT * 0.1;
+        const screenX = vpX + obj.wx * centerSpread * 0.5;
 
-        ctx.globalAlpha = Math.min(1, perspective * 3);
+        if (screenX < -80 || screenX > W + 80) continue;
+        ctx.globalAlpha = Math.min(1, 0.3 + (1 - depthT) * 0.7);
+
+        const s = perspScale;
 
         if (obj.type === 'tree') {
             // 나무 줄기
-            ctx.fillStyle = '#3a2a1a';
-            ctx.fillRect(screenX - 3*scale, screenY - obj.height*scale*0.5, 6*scale, obj.height*scale*0.5);
-            // 나무 잎
+            ctx.fillStyle = '#5D4037';
+            const tw = 5 * s, th = 25 * s;
+            ctx.fillRect(screenX - tw/2, screenY - th, tw, th);
+            // 나뭇잎 (둥근)
+            ctx.fillStyle = obj.treeGreen;
             ctx.beginPath();
-            ctx.arc(screenX, screenY - obj.height*scale*0.6, obj.width*scale*0.4, 0, Math.PI*2);
-            ctx.fillStyle = obj.color;
+            ctx.arc(screenX, screenY - th - 12*s, 15*s, 0, Math.PI*2);
+            ctx.fill();
+            // 하이라이트
+            ctx.fillStyle = 'rgba(255,255,255,0.15)';
+            ctx.beginPath();
+            ctx.arc(screenX - 4*s, screenY - th - 15*s, 6*s, 0, Math.PI*2);
             ctx.fill();
         } else if (obj.type === 'building') {
-            ctx.fillStyle = 'rgba(50,50,70,0.8)';
-            const bw = obj.width * scale;
-            const bh = obj.height * scale;
+            const bw = obj.w * s * 1.5, bh = obj.h * s * 1.2;
+            // 건물 본체 (포켓몬GO 스타일 블루그레이)
+            ctx.fillStyle = '#B0BEC5';
             ctx.fillRect(screenX - bw/2, screenY - bh, bw, bh);
+            // 지붕
+            ctx.fillStyle = '#78909C';
+            ctx.fillRect(screenX - bw/2 - 2*s, screenY - bh - 4*s, bw + 4*s, 6*s);
             // 창문
-            ctx.fillStyle = 'rgba(255,220,100,0.3)';
-            for (let wy = 0; wy < 3; wy++) {
-                for (let wx = 0; wx < 2; wx++) {
+            ctx.fillStyle = '#E3F2FD';
+            const rows = Math.max(1, Math.floor(bh / (12*s)));
+            const cols = Math.max(1, Math.floor(bw / (12*s)));
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
                     ctx.fillRect(
-                        screenX - bw/2 + bw*0.15 + wx*bw*0.45,
-                        screenY - bh + bh*0.15 + wy*bh*0.3,
-                        bw*0.2, bh*0.15
+                        screenX - bw/2 + 3*s + c*(bw/(cols)) ,
+                        screenY - bh + 8*s + r*(bh/(rows)),
+                        bw/(cols) * 0.5, bh/(rows) * 0.45
                     );
                 }
             }
-        } else if (obj.type === 'lamp') {
-            ctx.fillStyle = '#555';
-            ctx.fillRect(screenX - 1.5*scale, screenY - 50*scale, 3*scale, 50*scale);
-            // 가로등 빛
-            ctx.beginPath();
-            ctx.arc(screenX, screenY - 50*scale, 8*scale, 0, Math.PI*2);
-            ctx.fillStyle = 'rgba(255,220,100,0.2)';
-            ctx.fill();
-            ctx.beginPath();
-            ctx.arc(screenX, screenY - 50*scale, 3*scale, 0, Math.PI*2);
-            ctx.fillStyle = 'rgba(255,240,180,0.8)';
-            ctx.fill();
         } else if (obj.type === 'bush') {
+            ctx.fillStyle = obj.treeGreen;
             ctx.beginPath();
-            ctx.arc(screenX, screenY - 5*scale, obj.width*scale*0.3, 0, Math.PI*2);
-            ctx.fillStyle = obj.color;
+            ctx.ellipse(screenX, screenY - 3*s, 10*s, 7*s, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(255,255,255,0.1)';
+            ctx.beginPath();
+            ctx.ellipse(screenX - 3*s, screenY - 5*s, 4*s, 3*s, 0, 0, Math.PI*2);
+            ctx.fill();
+        } else if (obj.type === 'flower') {
+            const colors = ['#E91E63','#FF9800','#9C27B0','#FFEB3B','#F44336'];
+            ctx.fillStyle = colors[Math.floor(obj.wx * 100) % colors.length];
+            ctx.beginPath();
+            ctx.arc(screenX, screenY - 2*s, 3*s, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#4CAF50';
+            ctx.fillRect(screenX - 0.5*s, screenY - 2*s, 1*s, 4*s);
+        } else if (obj.type === 'bench') {
+            ctx.fillStyle = '#795548';
+            ctx.fillRect(screenX - 8*s, screenY - 4*s, 16*s, 3*s);
+            ctx.fillRect(screenX - 7*s, screenY - 1*s, 2*s, 4*s);
+            ctx.fillRect(screenX + 5*s, screenY - 1*s, 2*s, 4*s);
+        } else if (obj.type === 'lamp') {
+            ctx.fillStyle = '#616161';
+            ctx.fillRect(screenX - 1*s, screenY - 30*s, 2*s, 30*s);
+            ctx.fillStyle = '#FFF9C4';
+            ctx.beginPath();
+            ctx.arc(screenX, screenY - 30*s, 4*s, 0, Math.PI*2);
             ctx.fill();
         }
     }
     ctx.globalAlpha = 1;
 
-    // ── 보물 표시 (가까울 때) ──
-    if (fpvDistance < 200 && !fpvFound) {
-        const treasureScale = Math.max(0.3, 1 - fpvDistance / 200);
-        const treasureY = horizonY + (H - horizonY) * 0.3;
-        const pulse = 1 + Math.sin(fpvTime * 4) * 0.15;
-
-        // 보물 빛
-        const glowRadius = 40 * treasureScale * pulse;
-        const glowGrad = ctx.createRadialGradient(vanishX, treasureY, 0, vanishX, treasureY, glowRadius);
-        glowGrad.addColorStop(0, `rgba(245,175,25,${0.6 * treasureScale})`);
-        glowGrad.addColorStop(0.5, `rgba(241,39,17,${0.3 * treasureScale})`);
-        glowGrad.addColorStop(1, 'transparent');
-        ctx.fillStyle = glowGrad;
-        ctx.beginPath();
-        ctx.arc(vanishX, treasureY, glowRadius, 0, Math.PI*2);
-        ctx.fill();
-
-        // 보물 이모지
-        if (fpvDistance < 100) {
-            const emojiSize = 20 + 30 * treasureScale;
-            ctx.font = `${emojiSize}px serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(currentPlayer !== null ? treasureEmojis[currentPlayer] : '💎', vanishX, treasureY);
-        }
-
-        // 물음표 (멀 때)
-        if (fpvDistance >= 100 && fpvDistance < 200) {
-            ctx.font = `${16 * treasureScale + 10}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.fillStyle = `rgba(245,175,25,${0.5 + Math.sin(fpvTime*3)*0.3})`;
-            ctx.fillText('?', vanishX, treasureY);
-        }
-    }
-
-    // ── 레이더 (우측 상단) ──
-    const radarR = Math.min(55, W * 0.1);
-    const radarX = W - radarR - 16;
-    const radarY = radarR + 16;
-
-    // 레이더 배경
-    ctx.beginPath();
-    ctx.arc(radarX, radarY, radarR, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(0,20,0,0.7)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,255,0,0.3)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // 레이더 원
-    for (let r = 1; r <= 3; r++) {
-        ctx.beginPath();
-        ctx.arc(radarX, radarY, radarR * r / 3, 0, Math.PI*2);
-        ctx.strokeStyle = 'rgba(0,255,0,0.15)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-    }
-
-    // 십자선
-    ctx.strokeStyle = 'rgba(0,255,0,0.15)';
-    ctx.beginPath();
-    ctx.moveTo(radarX - radarR, radarY);
-    ctx.lineTo(radarX + radarR, radarY);
-    ctx.moveTo(radarX, radarY - radarR);
-    ctx.lineTo(radarX, radarY + radarR);
-    ctx.stroke();
-
-    // 레이더 스윕
-    const sweepAngle = fpvTime * 2;
-    ctx.beginPath();
-    ctx.moveTo(radarX, radarY);
-    ctx.arc(radarX, radarY, radarR, sweepAngle, sweepAngle + 0.5);
-    ctx.closePath();
-    const sweepGrad = ctx.createRadialGradient(radarX, radarY, 0, radarX, radarY, radarR);
-    sweepGrad.addColorStop(0, 'rgba(0,255,0,0.3)');
-    sweepGrad.addColorStop(1, 'rgba(0,255,0,0.05)');
-    ctx.fillStyle = sweepGrad;
-    ctx.fill();
-
-    // 플레이어 위치 (중앙)
-    ctx.beginPath();
-    ctx.arc(radarX, radarY, 3, 0, Math.PI*2);
-    ctx.fillStyle = currentPlayer !== null ? playerColors[currentPlayer] : '#fff';
-    ctx.fill();
-
-    // 보물 위치 (레이더에)
-    if (playerPos && currentPlayer !== null) {
-        const treasure = players[currentPlayer].treasure;
-        const bearingRad = fpvBearing * Math.PI / 180;
-        const distNorm = Math.min(1, fpvDistance / 500);
-        const dotX = radarX + Math.sin(bearingRad) * radarR * distNorm;
-        const dotY = radarY - Math.cos(bearingRad) * radarR * distNorm;
-
-        // 보물 점 깜빡임
-        const blink = 0.5 + 0.5 * Math.sin(fpvTime * 6);
-        ctx.beginPath();
-        ctx.arc(dotX, dotY, 4, 0, Math.PI*2);
-        ctx.fillStyle = `rgba(245,175,25,${blink})`;
-        ctx.fill();
-
-        // 거리 가까우면 더 큰 점
-        if (fpvDistance < 100) {
-            ctx.beginPath();
-            ctx.arc(dotX, dotY, 8, 0, Math.PI*2);
-            ctx.fillStyle = `rgba(245,175,25,${blink * 0.3})`;
-            ctx.fill();
-        }
-    }
-
-    // 레이더 텍스트
-    ctx.font = '9px monospace';
-    ctx.fillStyle = 'rgba(0,255,0,0.6)';
-    ctx.textAlign = 'center';
-    ctx.fillText('RADAR', radarX, radarY + radarR + 12);
-
-    // ── 방향 지시 화살표 (상단 중앙) ──
+    // ── 보물 (포켓스톱 스타일) ──
     if (playerPos && currentPlayer !== null && !fpvFound) {
-        const arrowSize = 20;
-        const arrowY2 = 30;
-        ctx.save();
-        ctx.translate(vanishX, arrowY2);
-        ctx.rotate(fpvBearing * Math.PI / 180);
-        ctx.beginPath();
-        ctx.moveTo(0, -arrowSize);
-        ctx.lineTo(-arrowSize * 0.6, arrowSize * 0.4);
-        ctx.lineTo(0, arrowSize * 0.1);
-        ctx.lineTo(arrowSize * 0.6, arrowSize * 0.4);
-        ctx.closePath();
+        const treasureDist = fpvDistance;
+        if (treasureDist < 400) {
+            const normDist = Math.max(0, Math.min(1, treasureDist / 400));
+            // 멀수록 위쪽(작게), 가까울수록 아래(크게)
+            const tY = vpY + (H * 0.55 - vpY) * (1 - normDist);
+            const tScale = 0.4 + (1 - normDist) * 0.6;
+            const tX = vpX + Math.sin(fpvBearing * Math.PI / 180) * (1 - normDist) * W * 0.15;
 
-        const arrowColor = fpvDistance < 100 ? '#e74c3c' :
-                          fpvDistance < 200 ? '#f39c12' :
-                          fpvDistance < 400 ? '#3498db' : '#2980b9';
-        ctx.fillStyle = arrowColor;
-        ctx.globalAlpha = 0.7 + Math.sin(fpvTime * 3) * 0.3;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.restore();
+            // 포켓스톱 기둥
+            ctx.fillStyle = '#90CAF9';
+            ctx.fillRect(tX - 2*tScale, tY, 4*tScale, 20*tScale);
 
-        // "보물 방향" 텍스트
-        ctx.font = '11px sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.textAlign = 'center';
-        ctx.fillText('보물 방향 ↑', vanishX, arrowY2 + arrowSize + 14);
-    }
+            // 포켓스톱 큐브 (회전 효과)
+            const spin = fpvTime * 2;
+            const cubeW = 18 * tScale;
+            const cubeH = 18 * tScale;
+            ctx.save();
+            ctx.translate(tX, tY - 5*tScale);
+            ctx.rotate(Math.sin(spin) * 0.2);
 
-    // ── 걷기 효과: 발자국 오버레이 ──
-    if (fpvWalking) {
-        const footY = H - 40;
-        const footAlpha = 0.3 + 0.2 * Math.sin(fpvTime * 8);
-        ctx.font = '24px serif';
-        ctx.globalAlpha = footAlpha;
-        ctx.textAlign = 'center';
-        if (Math.floor(fpvTime * 4) % 2 === 0) {
-            ctx.fillText('👟', vanishX - 30, footY);
-        } else {
-            ctx.fillText('👟', vanishX + 30, footY);
+            // 다이아몬드 형태
+            ctx.beginPath();
+            ctx.moveTo(0, -cubeH);
+            ctx.lineTo(cubeW, 0);
+            ctx.lineTo(0, cubeH);
+            ctx.lineTo(-cubeW, 0);
+            ctx.closePath();
+            const cubeGrad = ctx.createLinearGradient(-cubeW, -cubeH, cubeW, cubeH);
+            cubeGrad.addColorStop(0, '#42A5F5');
+            cubeGrad.addColorStop(0.5, '#90CAF9');
+            cubeGrad.addColorStop(1, '#1E88E5');
+            ctx.fillStyle = cubeGrad;
+            ctx.fill();
+            ctx.strokeStyle = '#1565C0';
+            ctx.lineWidth = 2 * tScale;
+            ctx.stroke();
+
+            // 가운데 보물 이모지
+            if (treasureDist < 150) {
+                ctx.font = `${14 * tScale}px serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(treasureEmojis[currentPlayer], 0, 0);
+            }
+
+            ctx.restore();
+
+            // 빛나는 원
+            if (treasureDist < 100) {
+                const glowR = 30 * tScale + Math.sin(fpvTime * 4) * 8 * tScale;
+                const glow = ctx.createRadialGradient(tX, tY - 5*tScale, 0, tX, tY - 5*tScale, glowR);
+                glow.addColorStop(0, 'rgba(66,165,245,0.4)');
+                glow.addColorStop(1, 'transparent');
+                ctx.fillStyle = glow;
+                ctx.beginPath();
+                ctx.arc(tX, tY - 5*tScale, glowR, 0, Math.PI*2);
+                ctx.fill();
+            }
+
+            // 떠다니는 반짝이 파티클
+            if (treasureDist < 200) {
+                for (let sp = 0; sp < 5; sp++) {
+                    const angle = fpvTime * 1.5 + sp * Math.PI * 2 / 5;
+                    const rad = 15 * tScale + Math.sin(fpvTime * 2 + sp) * 8 * tScale;
+                    const spX = tX + Math.cos(angle) * rad;
+                    const spY = tY - 5*tScale + Math.sin(angle) * rad * 0.5;
+                    const alpha = 0.3 + Math.sin(fpvTime * 3 + sp) * 0.3;
+                    ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(spX, spY, 2*tScale, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
         }
-        ctx.globalAlpha = 1;
     }
 
-    // ── 안개 효과 (가장자리 비네트) ──
-    const vignetteGrad = ctx.createRadialGradient(W/2, H/2, W*0.25, W/2, H/2, W*0.6);
-    vignetteGrad.addColorStop(0, 'transparent');
-    vignetteGrad.addColorStop(1, 'rgba(0,0,0,0.4)');
-    ctx.fillStyle = vignetteGrad;
-    ctx.fillRect(0, 0, W, H);
+    // ── 캐릭터 (화면 하단 중앙) ──
+    const charX = vpX + bobX;
+    const charY = H * 0.78 + bobY;
+    const charColor = currentPlayer !== null ? playerColors[currentPlayer] : '#e74c3c';
+    drawCharacter(ctx, charX, charY, charColor, fpvWalking, fpvTime);
 
-    ctx.restore();
+    // ── 캐릭터 아래 그림자 ──
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(charX, charY + 22, 16, 5, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // ── 캐릭터 주변 원 (활동 반경 표시) ──
+    ctx.strokeStyle = `${charColor}44`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(charX, charY + 15, 50, 18, 0, 0, Math.PI*2);
+    ctx.stroke();
+
+    // ── Nearby 트래커 업데이트 ──
+    updateTracker();
 
     fpvAnimFrame = requestAnimationFrame(renderFPV);
+}
+
+// ── 구름 그리기 ──
+function drawCloud(ctx, x, y, w) {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    const h = w * 0.35;
+    ctx.beginPath();
+    ctx.ellipse(x, y, w * 0.5, h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x - w * 0.25, y + h * 0.15, w * 0.3, h * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.25, y + h * 0.1, w * 0.35, h * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// ── 캐릭터 그리기 (포켓몬GO 트레이너 스타일) ──
+function drawCharacter(ctx, x, y, color, walking, time) {
+    const legSwing = walking ? Math.sin(time * 10) * 12 : 0;
+    const armSwing = walking ? Math.sin(time * 10) * 15 : 0;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    // 다리 (걸을 때 교차)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    // 왼다리
+    ctx.beginPath();
+    ctx.moveTo(-4, 5);
+    ctx.lineTo(-4 + Math.sin(legSwing * Math.PI/180) * 6, 20);
+    ctx.stroke();
+    // 오른다리
+    ctx.beginPath();
+    ctx.moveTo(4, 5);
+    ctx.lineTo(4 - Math.sin(legSwing * Math.PI/180) * 6, 20);
+    ctx.stroke();
+
+    // 신발
+    ctx.fillStyle = '#F44336';
+    ctx.beginPath();
+    ctx.ellipse(-4 + Math.sin(legSwing * Math.PI/180) * 6, 21, 4, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(4 - Math.sin(legSwing * Math.PI/180) * 6, 21, 4, 2.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 몸통 (색상 옷)
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(-9, -10, 18, 18, 4);
+    ctx.fill();
+    // 옷 밝은 부분
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.fillRect(-5, -8, 10, 4);
+
+    // 팔 (걸을 때 교차)
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 4;
+    // 왼팔
+    ctx.beginPath();
+    ctx.moveTo(-9, -5);
+    ctx.lineTo(-14 - Math.sin(armSwing * Math.PI/180) * 4, 5 + Math.sin(armSwing * Math.PI/180) * 3);
+    ctx.stroke();
+    // 오른팔
+    ctx.beginPath();
+    ctx.moveTo(9, -5);
+    ctx.lineTo(14 + Math.sin(armSwing * Math.PI/180) * 4, 5 - Math.sin(armSwing * Math.PI/180) * 3);
+    ctx.stroke();
+
+    // 손
+    ctx.fillStyle = '#FFCC80';
+    ctx.beginPath();
+    ctx.arc(-14 - Math.sin(armSwing * Math.PI/180) * 4, 6 + Math.sin(armSwing * Math.PI/180) * 3, 3, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(14 + Math.sin(armSwing * Math.PI/180) * 4, 6 - Math.sin(armSwing * Math.PI/180) * 3, 3, 0, Math.PI*2);
+    ctx.fill();
+
+    // 머리
+    ctx.fillStyle = '#FFCC80';
+    ctx.beginPath();
+    ctx.arc(0, -18, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 머리카락/모자
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(0, -21, 10, Math.PI, Math.PI * 2);
+    ctx.fill();
+    // 모자 챙
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(0, -21, 13, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 모자 윗부분
+    ctx.beginPath();
+    ctx.arc(0, -24, 9, Math.PI, Math.PI * 2);
+    ctx.fill();
+
+    // 눈
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(-3, -17, 1.5, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(3, -17, 1.5, 0, Math.PI*2);
+    ctx.fill();
+
+    // 입 (웃는 표정)
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(0, -14, 3, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.stroke();
+
+    ctx.restore();
+}
+
+// ── Nearby 트래커 UI ──
+function updateTracker() {
+    const tracker = document.getElementById('nearbyTracker');
+    const iconEl = document.getElementById('trackerIcon');
+    const feetEl = document.getElementById('trackerFeet');
+
+    if (!playerPos || currentPlayer === null) {
+        tracker.classList.remove('show');
+        return;
+    }
+    tracker.classList.add('show');
+
+    // 발자국 수 (3단계: 멀면 3개, 가까우면 0개)
+    let feetCount = 3;
+    if (fpvDistance <= FIND_RADIUS) feetCount = 0;
+    else if (fpvDistance <= 100) feetCount = 0;
+    else if (fpvDistance <= 200) feetCount = 1;
+    else if (fpvDistance <= 400) feetCount = 2;
+
+    if (fpvDistance < 200) {
+        iconEl.textContent = treasureEmojis[currentPlayer];
+    } else {
+        iconEl.textContent = '❓';
+    }
+
+    feetEl.innerHTML = '';
+    for (let i = 0; i < feetCount; i++) {
+        const span = document.createElement('span');
+        span.className = 'foot';
+        span.textContent = '🐾';
+        feetEl.appendChild(span);
+    }
 }
 
 function updateFPVState(dist, bearing, walking, found) {
@@ -761,36 +846,33 @@ function updateFPVState(dist, bearing, walking, found) {
     fpvWalking = walking;
     fpvFound = found;
 
-    // 거리에 따른 텍스트 업데이트
-    const fpvDistEl = document.getElementById('fpvDistance');
+    const el = document.getElementById('fpvDistance');
     const distStr = dist < 1000 ? Math.round(dist)+'m' : (dist/1000).toFixed(1)+'km';
 
     if (!playerPos) {
-        fpvDistEl.textContent = '지도를 클릭하여 탐험을 시작하세요';
-        fpvDistEl.style.color = '#aaa';
+        el.textContent = '지도를 클릭하여 탐험을 시작하세요';
+        el.style.color = '#fff';
     } else if (dist <= FIND_RADIUS) {
-        fpvDistEl.innerHTML = '🔥 ' + distStr + ' - 보물 발견!';
-        fpvDistEl.style.color = '#e74c3c';
+        el.innerHTML = '🔥 ' + distStr + ' - 보물 발견!';
+        el.style.color = '#ff6b6b';
     } else if (dist <= 100) {
-        fpvDistEl.innerHTML = '🔥 ' + distStr + ' - 매우 뜨거워!';
-        fpvDistEl.style.color = '#e74c3c';
+        el.innerHTML = '🔥 ' + distStr + ' - 매우 가까워!';
+        el.style.color = '#ff6b6b';
     } else if (dist <= 200) {
-        fpvDistEl.innerHTML = '🌡️ ' + distStr + ' - 뜨거워!';
-        fpvDistEl.style.color = '#f39c12';
+        el.innerHTML = '🌡️ ' + distStr + ' - 가까워지고 있어요!';
+        el.style.color = '#ffa726';
     } else if (dist <= 400) {
-        fpvDistEl.innerHTML = '❄️ ' + distStr + ' - 차가워';
-        fpvDistEl.style.color = '#3498db';
+        el.innerHTML = '❄️ ' + distStr + ' - 조금 더 가야해요';
+        el.style.color = '#42a5f5';
     } else {
-        fpvDistEl.innerHTML = '🧊 ' + distStr + ' - 매우 차가워!';
-        fpvDistEl.style.color = '#2980b9';
+        el.innerHTML = '🧊 ' + distStr + ' - 먼 곳이에요';
+        el.style.color = '#90caf9';
     }
 }
 
 function stopFPV() {
     if (fpvAnimFrame) cancelAnimationFrame(fpvAnimFrame);
-    fpvAnimFrame = null;
-    fpvCanvas = null;
-    fpvCtx = null;
+    fpvAnimFrame = null; fpvCanvas = null; fpvCtx = null;
 }
 
 // ═══════════════════════════════════════
@@ -802,18 +884,14 @@ function startGame(num) {
         alert(playerNames[currentPlayer] + '은(는) 이미 보물을 찾았습니다!');
         return;
     }
-
     stepCount = 0; playerPos = null; footprints = []; lastBearing = 0;
     document.getElementById('stepCount').textContent = '0';
     document.getElementById('lobby').style.display = 'none';
     document.getElementById('gameView').classList.add('active');
     document.getElementById('mapTitle').textContent =
         playerNames[currentPlayer] + ' ' + treasureEmojis[currentPlayer];
-
-    // 1인칭 뷰 초기화
     document.getElementById('fpvHeartbeat').className = 'fpv-heartbeat';
     document.getElementById('fpvGlow').style.display = 'none';
-
     initMap();
     setTimeout(initFPV, 100);
 }
@@ -823,34 +901,26 @@ function startGame(num) {
 // ═══════════════════════════════════════
 function initMap() {
     if (map) map.remove();
-
     map = L.map('map', { zoomControl: false }).setView(CAMPUS_CENTER, 16);
     L.control.zoom({ position: 'topright' }).addTo(map);
-
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OSM', maxZoom: 19
     }).addTo(map);
-
     L.rectangle([
         [CAMPUS_BOUNDS.latMin, CAMPUS_BOUNDS.lngMin],
         [CAMPUS_BOUNDS.latMax, CAMPUS_BOUNDS.lngMax]
     ], { color: playerColors[currentPlayer], weight: 2, fillOpacity: 0.03, dashArray: '8 4' }).addTo(map);
-
     const treasure = players[currentPlayer].treasure;
     hintCircle = L.circle(treasure, {
         radius: 150, color: '#f5af19', fillColor: '#f5af19',
         fillOpacity: 0.06, weight: 1, dashArray: '4 4'
     }).addTo(map);
-
     pathLine = L.polyline([], {
         color: playerColors[currentPlayer], weight: 3, opacity: 0.5, dashArray: '6 8'
     }).addTo(map);
-
     map.on('click', onMapClick);
-
     document.getElementById('hintText').textContent = '노란 점선 원 안에 보물이 있습니다!';
     document.getElementById('distanceBar').style.width = '0%';
-
     setTimeout(() => map.invalidateSize(), 150);
 }
 
@@ -859,38 +929,28 @@ function initMap() {
 // ═══════════════════════════════════════
 function onMapClick(e) {
     const target = [e.latlng.lat, e.latlng.lng];
-
-    // 걷는 중이면 현재 애니메이션 중지
     if (walkAnimation) {
-        clearTimeout(walkAnimation);
-        walkAnimation = null;
+        clearTimeout(walkAnimation); walkAnimation = null;
         isWalking = false;
         document.getElementById('walkingIndicator').classList.remove('show');
     }
-
     if (!playerPos) {
         playerPos = target;
         placePlayer(playerPos);
         updateGameUI();
         return;
     }
-
     walkTo(target);
 }
 
-// ═══════════════════════════════════════
-//  걷기 애니메이션
-// ═══════════════════════════════════════
 function walkTo(target) {
     const start = [...playerPos];
     const totalDist = getDistance(start[0], start[1], target[0], target[1]);
     const totalSteps = Math.max(1, Math.ceil(totalDist / WALK_SPEED));
     let currentStep = 0;
-
     const bearing = getBearing(start[0], start[1], target[0], target[1]);
     lastBearing = bearing;
     document.getElementById('compassArrow').style.transform = `rotate(${bearing}deg)`;
-
     isWalking = true;
     document.getElementById('walkingIndicator').classList.add('show');
 
@@ -899,19 +959,13 @@ function walkTo(target) {
         const t = Math.min(currentStep / totalSteps, 1);
         const eased = 1 - Math.pow(1 - t, 2);
         playerPos = lerpLatLng(start, target, eased);
-
         placePlayer(playerPos);
         pathLine.addLatLng(playerPos);
-
         stepCount++;
         document.getElementById('stepCount').textContent = stepCount;
         if (stepCount % 5 === 0) addFootprint(playerPos, bearing);
-
         map.setView(playerPos, map.getZoom(), { animate: false });
-
         updateGameUI();
-
-        // 보물 체크
         const treasure = players[currentPlayer].treasure;
         const dist = getDistance(playerPos[0], playerPos[1], treasure[0], treasure[1]);
         if (dist <= FIND_RADIUS) {
@@ -920,7 +974,6 @@ function walkTo(target) {
             foundTreasure();
             return;
         }
-
         if (currentStep < totalSteps) {
             walkAnimation = setTimeout(step, STEP_INTERVAL);
         } else {
@@ -967,7 +1020,6 @@ function addFootprint(pos, bearing) {
 // ═══════════════════════════════════════
 function updateGameUI() {
     if (!playerPos) return;
-
     const treasure = players[currentPlayer].treasure;
     const dist = getDistance(playerPos[0], playerPos[1], treasure[0], treasure[1]);
     const hintEl = document.getElementById('hintText');
@@ -978,11 +1030,9 @@ function updateGameUI() {
 
     const barPct = Math.max(0, Math.min(100, (1 - dist/500)*100));
     bar.style.width = barPct + '%';
-
     const bearingToTreasure = getBearing(playerPos[0], playerPos[1], treasure[0], treasure[1]);
     document.getElementById('compassArrow').style.transform = `rotate(${bearingToTreasure}deg)`;
 
-    // 1인칭 뷰 상태 업데이트
     updateFPVState(dist, bearingToTreasure, isWalking, players[currentPlayer].found);
 
     if (dist <= FIND_RADIUS) {
@@ -1025,7 +1075,6 @@ function updateGameUI() {
 function foundTreasure() {
     const treasure = players[currentPlayer].treasure;
     fpvFound = true;
-
     const icon = L.divIcon({
         html: `<div style="font-size:2.5rem;animation:bounceIn .6s cubic-bezier(.175,.885,.32,1.275);">${treasureEmojis[currentPlayer]}</div>
         <style>@keyframes bounceIn{0%{transform:scale(0) rotate(-20deg);opacity:0}60%{transform:scale(1.3) rotate(10deg)}100%{transform:scale(1) rotate(0);opacity:1}}</style>`,
@@ -1033,10 +1082,8 @@ function foundTreasure() {
     });
     treasureMarker = L.marker(treasure, { icon, zIndexOffset: 2000 }).addTo(map);
     map.flyTo(treasure, 18, { duration: 1 });
-
     players[currentPlayer].found = true;
     spawnParticles();
-
     setTimeout(() => {
         document.getElementById('foundMsg').textContent =
             playerNames[currentPlayer] + '이(가) ' + treasureEmojis[currentPlayer] +
@@ -1045,9 +1092,6 @@ function foundTreasure() {
     }, 1200);
 }
 
-// ═══════════════════════════════════════
-//  파티클
-// ═══════════════════════════════════════
 function spawnParticles() {
     const emojis = ['🎉','✨','🌟','💫','🎊','⭐','🎆'];
     for (let i = 0; i < 30; i++) {
@@ -1098,6 +1142,5 @@ function showBonus() {
     document.getElementById('bonusModal').classList.add('show');
 }
 </script>
-
 </body>
 </html>
