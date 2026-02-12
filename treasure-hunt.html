@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>경북대 보물찾기</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #fff; min-height: 100vh; overflow: hidden; }
+
+        /* ── 로비 ── */
+        #lobby {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            min-height: 100vh; padding: 20px;
+        }
+        #lobby h1 {
+            font-size: 3rem; margin-bottom: 10px;
+            background: linear-gradient(135deg, #f5af19, #f12711);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        #lobby .subtitle { color: #888; margin-bottom: 40px; font-size: 1.1rem; }
+        .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; max-width: 500px; width: 100%; }
+        .player-btn {
+            position: relative; padding: 30px 20px; border: none; border-radius: 16px;
+            font-size: 1.3rem; font-weight: bold; color: #fff; cursor: pointer;
+            transition: all 0.3; overflow: hidden;
+        }
+        .player-btn:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+        .player-btn.found { opacity: 0.7; }
+        .player-btn.found::after {
+            content: '\2705 발견!'; position: absolute; top: 8px; right: 12px;
+            font-size: 0.8rem; background: rgba(0,0,0,0.4); padding: 2px 8px; border-radius: 8px;
+        }
+        .player-btn .icon { font-size: 2.5rem; display: block; margin-bottom: 8px; }
+        .p1 { background: linear-gradient(135deg, #e74c3c, #c0392b); }
+        .p2 { background: linear-gradient(135deg, #3498db, #2980b9); }
+        .p3 { background: linear-gradient(135deg, #2ecc71, #27ae60); }
+        .p4 { background: linear-gradient(135deg, #f39c12, #e67e22); }
+        .bonus-section { margin-top: 40px; text-align: center; }
+        .bonus-btn {
+            padding: 18px 50px; border: none; border-radius: 50px;
+            font-size: 1.3rem; font-weight: bold; color: #fff; cursor: pointer;
+            background: linear-gradient(135deg, #8e44ad, #9b59b6);
+            transition: all 0.3s; opacity: 0.3; pointer-events: none;
+        }
+        .bonus-btn.active { opacity: 1; pointer-events: auto; animation: glow 1.5s ease-in-out infinite alternate; }
+        .bonus-btn.active:hover { transform: scale(1.05); }
+        @keyframes glow { from { box-shadow: 0 0 10px #8e44ad; } to { box-shadow: 0 0 30px #8e44ad, 0 0 60px #9b59b6; } }
+        .progress-text { margin-top: 15px; color: #aaa; font-size: 0.95rem; }
+
+        /* ── 게임 화면 ── */
+        #gameView { display: none; height: 100vh; position: relative; }
+
+        /* 상단 바 */
+        .game-header {
+            position: absolute; top: 0; left: 0; right: 0; z-index: 1000;
+            background: rgba(26,26,46,0.92); backdrop-filter: blur(10px);
+            padding: 10px 20px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .game-header h2 { font-size: 1.1rem; }
+        .back-btn {
+            padding: 6px 16px; border: 2px solid #fff; border-radius: 20px;
+            background: transparent; color: #fff; font-size: 0.85rem; cursor: pointer; transition: all 0.2s;
+        }
+        .back-btn:hover { background: #fff; color: #1a1a2e; }
+        .step-counter {
+            font-size: 0.85rem; color: #aaa;
+        }
+        .step-counter span { color: #f5af19; font-weight: bold; }
+
+        /* 지도 영역 */
+        #map { width: 100%; height: 100%; }
+
+        /* 안개 오버레이 (비네팅) */
+        .fog-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none; z-index: 800;
+            background: radial-gradient(circle at center, transparent 20%, rgba(26,26,46,0.3) 50%, rgba(26,26,46,0.7) 80%);
+            transition: background 0.5s;
+        }
+        .fog-overlay.close {
+            background: radial-gradient(circle at center, transparent 35%, rgba(26,26,46,0.2) 60%, rgba(26,26,46,0.5) 85%);
+        }
+        .fog-overlay.very-close {
+            background: radial-gradient(circle at center, transparent 50%, rgba(245,175,25,0.1) 70%, rgba(26,26,46,0.3) 90%);
+        }
+
+        /* 하단 HUD */
+        .hud {
+            position: absolute; bottom: 0; left: 0; right: 0; z-index: 1000;
+            background: rgba(26,26,46,0.92); backdrop-filter: blur(10px);
+            padding: 14px 20px;
+        }
+        .hud-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+        .hud .distance-text { font-size: 1.3rem; font-weight: bold; }
+        .hud .hint-text { font-size: 0.85rem; color: #aaa; }
+        .compass {
+            width: 50px; height: 50px; position: relative;
+            border: 2px solid rgba(255,255,255,0.2); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .compass-arrow {
+            width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
+            border-bottom: 20px solid #e74c3c; transition: transform 0.5s ease;
+            position: absolute;
+        }
+        .compass-n { position: absolute; top: 2px; font-size: 0.6rem; color: #e74c3c; font-weight: bold; }
+
+        /* 거리 바 */
+        .distance-bar-container {
+            width: 100%; height: 8px; background: rgba(255,255,255,0.1);
+            border-radius: 4px; overflow: hidden;
+        }
+        .distance-bar {
+            height: 100%; border-radius: 4px; transition: width 0.8s ease, background 0.5s;
+            width: 0%;
+        }
+
+        /* 걷기 인디케이터 */
+        .walking-indicator {
+            position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+            z-index: 1000; display: none; align-items: center; gap: 8px;
+            background: rgba(26,26,46,0.85); backdrop-filter: blur(8px);
+            padding: 8px 18px; border-radius: 20px; font-size: 0.9rem;
+        }
+        .walking-indicator.show { display: flex; }
+        .walk-dots span {
+            display: inline-block; width: 6px; height: 6px; background: #f5af19;
+            border-radius: 50%; margin: 0 2px; animation: walkDot 0.6s ease infinite;
+        }
+        .walk-dots span:nth-child(2) { animation-delay: 0.15s; }
+        .walk-dots span:nth-child(3) { animation-delay: 0.3s; }
+        @keyframes walkDot {
+            0%, 100% { opacity: 0.3; transform: translateY(0); }
+            50% { opacity: 1; transform: translateY(-4px); }
+        }
+
+        /* 발자국 */
+        .footprint {
+            position: absolute; z-index: 600; pointer-events: none;
+            font-size: 0.9rem; opacity: 0.6;
+            animation: fadeFootprint 3s ease forwards;
+        }
+        @keyframes fadeFootprint {
+            0% { opacity: 0.6; }
+            100% { opacity: 0; }
+        }
+
+        /* 화면 흔들림 */
+        @keyframes shake {
+            0%, 100% { transform: translate(0); }
+            10% { transform: translate(-3px, -2px); }
+            20% { transform: translate(3px, 2px); }
+            30% { transform: translate(-2px, 3px); }
+            40% { transform: translate(2px, -3px); }
+            50% { transform: translate(-3px, 1px); }
+            60% { transform: translate(3px, -1px); }
+            70% { transform: translate(-1px, 3px); }
+            80% { transform: translate(1px, -2px); }
+            90% { transform: translate(-2px, 2px); }
+        }
+        .screen-shake { animation: shake 0.5s ease; }
+
+        /* 보물 발견 빛 */
+        .treasure-glow {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 300px; height: 300px; border-radius: 50%; pointer-events: none; z-index: 900;
+            background: radial-gradient(circle, rgba(245,175,25,0.4) 0%, transparent 70%);
+            animation: pulseGlow 1s ease-in-out infinite alternate;
+            display: none;
+        }
+        @keyframes pulseGlow {
+            0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.5; }
+            100% { transform: translate(-50%, -50%) scale(1.3); opacity: 1; }
+        }
+
+        /* 심박 효과 (근접 시 화면 테두리) */
+        .heartbeat-border {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none; z-index: 850;
+            border: 4px solid transparent; transition: border-color 0.3s;
+        }
+        .heartbeat-border.active {
+            animation: heartbeatBorder 1s ease-in-out infinite;
+        }
+        @keyframes heartbeatBorder {
+            0%, 100% { border-color: transparent; }
+            50% { border-color: rgba(245,175,25,0.6); }
+        }
+        .heartbeat-border.very-close {
+            animation: heartbeatBorderFast 0.5s ease-in-out infinite;
+        }
+        @keyframes heartbeatBorderFast {
+            0%, 100% { border-color: transparent; }
+            50% { border-color: rgba(231,76,60,0.8); }
+        }
+
+        /* ── 모달 ── */
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7); z-index: 2000; align-items: center; justify-content: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal {
+            background: #16213e; border-radius: 20px; padding: 40px;
+            text-align: center; max-width: 400px; width: 90%;
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        @keyframes popIn { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .modal .treasure-icon { font-size: 5rem; margin-bottom: 15px; }
+        .modal h2 { font-size: 1.8rem; margin-bottom: 10px; color: #f5af19; }
+        .modal p { color: #aaa; margin-bottom: 20px; }
+        .modal button {
+            padding: 12px 40px; border: none; border-radius: 25px;
+            background: linear-gradient(135deg, #f5af19, #f12711);
+            color: #fff; font-size: 1.1rem; font-weight: bold; cursor: pointer; transition: transform 0.2s;
+        }
+        .modal button:hover { transform: scale(1.05); }
+        .bonus-modal .treasure-icon { font-size: 4rem; }
+        .bonus-modal h2 { color: #9b59b6; }
+        .coupon {
+            background: linear-gradient(135deg, #f5af19, #f12711);
+            border-radius: 12px; padding: 20px; margin: 15px 0;
+            font-size: 1.5rem; font-weight: bold;
+        }
+        .coupon .label { font-size: 0.85rem; opacity: 0.8; }
+
+        /* ── 파티클 ── */
+        .particle {
+            position: fixed; pointer-events: none; z-index: 3000;
+            font-size: 1.5rem; animation: fall 2s ease-in forwards;
+        }
+        @keyframes fall {
+            0% { opacity: 1; transform: translateY(0) rotate(0deg); }
+            100% { opacity: 0; transform: translateY(100vh) rotate(720deg); }
+        }
+
+        .temp-hot { color: #e74c3c; }
+        .temp-warm { color: #f39c12; }
+        .temp-cool { color: #3498db; }
+        .temp-cold { color: #2980b9; }
+    </style>
+</head>
+<body>
+
+<!-- ====== 로비 ====== -->
+<div id="lobby">
+    <h1>🗺️ 보물찾기</h1>
+    <p class="subtitle">경북대학교 캠퍼스 - 숨겨진 보물을 찾아라!</p>
+    <div class="player-grid">
+        <button class="player-btn p1" onclick="startGame(1)"><span class="icon">🔴</span>플레이어 1</button>
+        <button class="player-btn p2" onclick="startGame(2)"><span class="icon">🔵</span>플레이어 2</button>
+        <button class="player-btn p3" onclick="startGame(3)"><span class="icon">🟢</span>플레이어 3</button>
+        <button class="player-btn p4" onclick="startGame(4)"><span class="icon">🟡</span>플레이어 4</button>
+    </div>
+    <div class="bonus-section">
+        <button class="bonus-btn" id="bonusBtn" onclick="showBonus()">🎁 보너스 서비스 받기</button>
+        <p class="progress-text" id="progressText">보물 발견: 0 / 4</p>
+    </div>
+</div>
+
+<!-- ====== 게임 화면 ====== -->
+<div id="gameView">
+    <div class="game-header">
+        <button class="back-btn" onclick="goBack()">← 로비</button>
+        <h2 id="mapTitle">플레이어 1</h2>
+        <div class="step-counter">걸음: <span id="stepCount">0</span></div>
+    </div>
+
+    <div id="map"></div>
+    <div class="fog-overlay" id="fogOverlay"></div>
+    <div class="heartbeat-border" id="heartbeatBorder"></div>
+    <div class="treasure-glow" id="treasureGlow"></div>
+
+    <div class="walking-indicator" id="walkingIndicator">
+        <div class="walk-dots"><span></span><span></span><span></span></div>
+        <span>이동 중...</span>
+    </div>
+
+    <div class="hud">
+        <div class="hud-top">
+            <div>
+                <div class="distance-text" id="distanceText">지도를 클릭하여 이동하세요</div>
+                <div class="hint-text" id="hintText">클릭한 위치로 걸어갑니다</div>
+            </div>
+            <div class="compass" id="compass">
+                <span class="compass-n">N</span>
+                <div class="compass-arrow" id="compassArrow"></div>
+            </div>
+        </div>
+        <div class="distance-bar-container">
+            <div class="distance-bar" id="distanceBar"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ====== 모달 ====== -->
+<div class="modal-overlay" id="foundModal">
+    <div class="modal">
+        <div class="treasure-icon">🎉</div>
+        <h2>보물 발견!</h2>
+        <p id="foundMsg">축하합니다!</p>
+        <button onclick="closeFoundModal()">로비로 돌아가기</button>
+    </div>
+</div>
+
+<div class="modal-overlay" id="bonusModal">
+    <div class="modal bonus-modal">
+        <div class="treasure-icon">🏆🎊🏆</div>
+        <h2>전원 보물 발견!</h2>
+        <p>4명 모두 보물을 찾았습니다! 특별 보너스를 드립니다!</p>
+        <div class="coupon"><div class="label">특별 할인 쿠폰</div>🎫 50% OFF</div>
+        <p style="font-size:0.85rem;">쿠폰코드: KNU-TREASURE-2026</p>
+        <button onclick="closeBonusModal()">닫기</button>
+    </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════
+//  상수 & 상태
+// ═══════════════════════════════════════
+const CAMPUS_CENTER = [35.8882, 128.6107];
+const CAMPUS_BOUNDS = { latMin: 35.8840, latMax: 35.8930, lngMin: 128.6050, lngMax: 128.6170 };
+const FIND_RADIUS = 50;
+const WALK_SPEED = 15;       // 한 스텝당 이동할 미터
+const STEP_INTERVAL = 60;    // 스텝 간격 ms (작을수록 빠름)
+
+const playerColors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12'];
+const playerNames = ['플레이어 1', '플레이어 2', '플레이어 3', '플레이어 4'];
+const treasureEmojis = ['💎', '👑', '🏺', '⭐'];
+
+let players = Array.from({length: 4}, () => ({ found: false, treasure: null }));
+let currentPlayer = null;
+let map = null;
+let playerMarker = null;
+let treasureMarker = null;
+let radiusCircle = null;
+let hintCircle = null;
+
+let playerPos = null;         // 현재 플레이어 위치 [lat, lng]
+let walkAnimation = null;     // 걷기 애니메이션 ID
+let isWalking = false;
+let stepCount = 0;
+let footprints = [];          // 발자국 레이어들
+let pathLine = null;          // 이동 경로 선
+
+// ═══════════════════════════════════════
+//  유틸리티
+// ═══════════════════════════════════════
+function getDistance(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function getBearing(lat1, lng1, lat2, lng2) {
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const y = Math.sin(dLng) * Math.cos(lat2 * Math.PI / 180);
+    const x = Math.cos(lat1 * Math.PI / 180) * Math.sin(lat2 * Math.PI / 180) -
+              Math.sin(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.cos(dLng);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function lerpLatLng(from, to, t) {
+    return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
+}
+
+function randomCampusLocation() {
+    return [
+        CAMPUS_BOUNDS.latMin + Math.random() * (CAMPUS_BOUNDS.latMax - CAMPUS_BOUNDS.latMin),
+        CAMPUS_BOUNDS.lngMin + Math.random() * (CAMPUS_BOUNDS.lngMax - CAMPUS_BOUNDS.lngMin)
+    ];
+}
+
+function initTreasures() {
+    for (let i = 0; i < 4; i++) players[i].treasure = randomCampusLocation();
+}
+
+// ═══════════════════════════════════════
+//  게임 시작
+// ═══════════════════════════════════════
+function startGame(num) {
+    currentPlayer = num - 1;
+    if (players[currentPlayer].found) {
+        alert(playerNames[currentPlayer] + '은(는) 이미 보물을 찾았습니다!');
+        return;
+    }
+
+    stepCount = 0;
+    playerPos = null;
+    footprints = [];
+    document.getElementById('stepCount').textContent = '0';
+    document.getElementById('lobby').style.display = 'none';
+    document.getElementById('gameView').style.display = 'block';
+    document.getElementById('mapTitle').textContent =
+        playerNames[currentPlayer] + ' ' + treasureEmojis[currentPlayer];
+
+    initMap();
+}
+
+// ═══════════════════════════════════════
+//  지도 초기화
+// ═══════════════════════════════════════
+function initMap() {
+    if (map) map.remove();
+
+    map = L.map('map', { zoomControl: false }).setView(CAMPUS_CENTER, 17);
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap', maxZoom: 19
+    }).addTo(map);
+
+    // 캠퍼스 경계
+    L.rectangle([
+        [CAMPUS_BOUNDS.latMin, CAMPUS_BOUNDS.lngMin],
+        [CAMPUS_BOUNDS.latMax, CAMPUS_BOUNDS.lngMax]
+    ], { color: playerColors[currentPlayer], weight: 2, fillOpacity: 0.03, dashArray: '8 4' }).addTo(map);
+
+    // 보물 힌트 영역
+    const treasure = players[currentPlayer].treasure;
+    hintCircle = L.circle(treasure, {
+        radius: 150, color: '#f5af19', fillColor: '#f5af19',
+        fillOpacity: 0.06, weight: 1, dashArray: '4 4'
+    }).addTo(map);
+
+    // 이동 경로 라인
+    pathLine = L.polyline([], {
+        color: playerColors[currentPlayer], weight: 3, opacity: 0.5, dashArray: '6 8'
+    }).addTo(map);
+
+    map.on('click', onMapClick);
+
+    // UI 초기화
+    document.getElementById('distanceText').textContent = '지도를 클릭하여 이동하세요';
+    document.getElementById('hintText').textContent = '노란 점선 원 안에 보물이 있습니다!';
+    document.getElementById('distanceBar').style.width = '0%';
+    document.getElementById('fogOverlay').className = 'fog-overlay';
+    document.getElementById('heartbeatBorder').className = 'heartbeat-border';
+    document.getElementById('treasureGlow').style.display = 'none';
+
+    setTimeout(() => map.invalidateSize(), 100);
+}
+
+// ═══════════════════════════════════════
+//  지도 클릭 → 걷기 시작
+// ═══════════════════════════════════════
+function onMapClick(e) {
+    const target = [e.latlng.lat, e.latlng.lng];
+
+    // 첫 클릭이면 바로 위치 설정
+    if (!playerPos) {
+        playerPos = target;
+        placePlayer(playerPos);
+        updateGameUI();
+        return;
+    }
+
+    // 이미 걷는 중이면 새 목적지로 변경
+    if (walkAnimation) {
+        cancelAnimationFrame(walkAnimation);
+        walkAnimation = null;
+    }
+
+    walkTo(target);
+}
+
+// ═══════════════════════════════════════
+//  부드러운 걷기 애니메이션
+// ═══════════════════════════════════════
+function walkTo(target) {
+    const start = [...playerPos];
+    const totalDist = getDistance(start[0], start[1], target[0], target[1]);
+    const totalSteps = Math.max(1, Math.ceil(totalDist / WALK_SPEED));
+    let currentStep = 0;
+
+    // 나침반 업데이트
+    const bearing = getBearing(start[0], start[1], target[0], target[1]);
+    document.getElementById('compassArrow').style.transform = `rotate(${bearing}deg)`;
+
+    isWalking = true;
+    document.getElementById('walkingIndicator').classList.add('show');
+
+    function step() {
+        currentStep++;
+        const t = Math.min(currentStep / totalSteps, 1);
+        // ease-out 효과
+        const eased = 1 - Math.pow(1 - t, 2);
+        playerPos = lerpLatLng(start, target, eased);
+
+        // 플레이어 마커 이동
+        placePlayer(playerPos);
+
+        // 경로 라인 업데이트
+        pathLine.addLatLng(playerPos);
+
+        // 발자국 생성 (5스텝마다)
+        stepCount++;
+        document.getElementById('stepCount').textContent = stepCount;
+        if (stepCount % 5 === 0) {
+            addFootprint(playerPos, bearing);
+        }
+
+        // 카메라 부드럽게 따라가기
+        map.panTo(playerPos, { animate: true, duration: 0.1, easeLinearity: 0.5 });
+
+        // 게임 UI 업데이트
+        updateGameUI();
+
+        // 보물 발견 체크
+        const treasure = players[currentPlayer].treasure;
+        const dist = getDistance(playerPos[0], playerPos[1], treasure[0], treasure[1]);
+        if (dist <= FIND_RADIUS) {
+            isWalking = false;
+            document.getElementById('walkingIndicator').classList.remove('show');
+            foundTreasure();
+            return;
+        }
+
+        if (currentStep < totalSteps) {
+            walkAnimation = setTimeout(step, STEP_INTERVAL);
+        } else {
+            isWalking = false;
+            document.getElementById('walkingIndicator').classList.remove('show');
+            walkAnimation = null;
+        }
+    }
+
+    step();
+}
+
+// ═══════════════════════════════════════
+//  플레이어 마커 배치/이동
+// ═══════════════════════════════════════
+function placePlayer(pos) {
+    const color = playerColors[currentPlayer];
+
+    if (playerMarker) {
+        playerMarker.setLatLng(pos);
+    } else {
+        const icon = L.divIcon({
+            html: `<div class="player-dot" style="
+                width: 22px; height: 22px; border-radius: 50%;
+                background: ${color}; border: 3px solid #fff;
+                box-shadow: 0 0 12px ${color}, 0 2px 8px rgba(0,0,0,0.4);
+                transition: box-shadow 0.3s;
+            "></div>
+            <div style="
+                position: absolute; top: -2px; left: -2px;
+                width: 26px; height: 26px; border-radius: 50%;
+                border: 2px solid ${color}; opacity: 0.5;
+                animation: ping 1.5s ease-out infinite;
+            "></div>
+            <style>@keyframes ping { 0% { transform: scale(1); opacity: 0.5; } 100% { transform: scale(2.5); opacity: 0; } }</style>`,
+            iconSize: [22, 22], iconAnchor: [11, 11], className: ''
+        });
+        playerMarker = L.marker(pos, { icon, zIndexOffset: 1000 }).addTo(map);
+    }
+
+    // 감지 반경
+    if (radiusCircle) {
+        radiusCircle.setLatLng(pos);
+    } else {
+        radiusCircle = L.circle(pos, {
+            radius: FIND_RADIUS, color, fillColor: color,
+            fillOpacity: 0.08, weight: 1
+        }).addTo(map);
+    }
+}
+
+// ═══════════════════════════════════════
+//  발자국 생성
+// ═══════════════════════════════════════
+function addFootprint(pos, bearing) {
+    const foot = stepCount % 10 < 5 ? '👣' : '👣';
+    const icon = L.divIcon({
+        html: `<div style="font-size: 0.7rem; opacity: 0.4; transform: rotate(${bearing}deg);">${foot}</div>`,
+        iconSize: [12, 12], iconAnchor: [6, 6], className: 'footprint-marker'
+    });
+    const marker = L.marker(pos, { icon, interactive: false }).addTo(map);
+    footprints.push(marker);
+
+    // 오래된 발자국 제거
+    if (footprints.length > 30) {
+        map.removeLayer(footprints.shift());
+    }
+}
+
+// ═══════════════════════════════════════
+//  게임 UI 업데이트 (거리, 안개, 심박 등)
+// ═══════════════════════════════════════
+function updateGameUI() {
+    if (!playerPos) return;
+
+    const treasure = players[currentPlayer].treasure;
+    const dist = getDistance(playerPos[0], playerPos[1], treasure[0], treasure[1]);
+    const distEl = document.getElementById('distanceText');
+    const hintEl = document.getElementById('hintText');
+    const bar = document.getElementById('distanceBar');
+    const fog = document.getElementById('fogOverlay');
+    const hb = document.getElementById('heartbeatBorder');
+    const glow = document.getElementById('treasureGlow');
+    const gameView = document.getElementById('gameView');
+
+    const distStr = dist < 1000 ? Math.round(dist) + 'm' : (dist / 1000).toFixed(1) + 'km';
+
+    // 거리 바: 최대 500m 기준
+    const barPct = Math.max(0, Math.min(100, (1 - dist / 500) * 100));
+    bar.style.width = barPct + '%';
+
+    if (dist <= FIND_RADIUS) {
+        distEl.innerHTML = `<span class="temp-hot">🔥 ${distStr} - 보물 발견!</span>`;
+        hintEl.textContent = '';
+        bar.style.background = '#e74c3c';
+        fog.className = 'fog-overlay very-close';
+        hb.className = 'heartbeat-border very-close';
+        glow.style.display = 'block';
+        gameView.classList.add('screen-shake');
+        setTimeout(() => gameView.classList.remove('screen-shake'), 500);
+    } else if (dist <= 100) {
+        distEl.innerHTML = `<span class="temp-hot">🔥 ${distStr} - 매우 뜨거워!</span>`;
+        hintEl.textContent = '거의 다 왔어요! 조금만 더!';
+        bar.style.background = 'linear-gradient(90deg, #e74c3c, #f39c12)';
+        fog.className = 'fog-overlay very-close';
+        hb.className = 'heartbeat-border very-close';
+        glow.style.display = 'block';
+        // 가까울 때 살짝 흔들림
+        if (Math.random() > 0.7) {
+            gameView.classList.add('screen-shake');
+            setTimeout(() => gameView.classList.remove('screen-shake'), 300);
+        }
+    } else if (dist <= 200) {
+        distEl.innerHTML = `<span class="temp-warm">🌡️ ${distStr} - 뜨거워!</span>`;
+        hintEl.textContent = '가까워지고 있어요!';
+        bar.style.background = 'linear-gradient(90deg, #f39c12, #f5af19)';
+        fog.className = 'fog-overlay close';
+        hb.className = 'heartbeat-border active';
+        glow.style.display = 'none';
+    } else if (dist <= 400) {
+        distEl.innerHTML = `<span class="temp-cool">❄️ ${distStr} - 차가워</span>`;
+        hintEl.textContent = '아직 멀어요... 노란 원 안을 탐색해보세요.';
+        bar.style.background = '#3498db';
+        fog.className = 'fog-overlay';
+        hb.className = 'heartbeat-border';
+        glow.style.display = 'none';
+    } else {
+        distEl.innerHTML = `<span class="temp-cold">🧊 ${distStr} - 매우 차가워!</span>`;
+        hintEl.textContent = '너무 멀어요! 다른 방향으로 가보세요.';
+        bar.style.background = '#2980b9';
+        fog.className = 'fog-overlay';
+        hb.className = 'heartbeat-border';
+        glow.style.display = 'none';
+    }
+
+    // 보물 방향 나침반
+    const bearingToTreasure = getBearing(playerPos[0], playerPos[1], treasure[0], treasure[1]);
+    document.getElementById('compassArrow').style.transform = `rotate(${bearingToTreasure}deg)`;
+}
+
+// ═══════════════════════════════════════
+//  보물 발견!
+// ═══════════════════════════════════════
+function foundTreasure() {
+    const treasure = players[currentPlayer].treasure;
+
+    // 보물 마커
+    const icon = L.divIcon({
+        html: `<div style="font-size: 2.5rem; animation: bounceIn 0.6s cubic-bezier(0.175,0.885,0.32,1.275);">
+            ${treasureEmojis[currentPlayer]}
+        </div>
+        <style>@keyframes bounceIn {
+            0% { transform: scale(0) rotate(-20deg); opacity: 0; }
+            60% { transform: scale(1.3) rotate(10deg); }
+            100% { transform: scale(1) rotate(0deg); opacity: 1; }
+        }</style>`,
+        iconSize: [40, 40], iconAnchor: [20, 20], className: ''
+    });
+    treasureMarker = L.marker(treasure, { icon, zIndexOffset: 2000 }).addTo(map);
+
+    // 줌인
+    map.flyTo(treasure, 18, { duration: 1 });
+
+    players[currentPlayer].found = true;
+    spawnParticles();
+
+    setTimeout(() => {
+        document.getElementById('foundMsg').textContent =
+            playerNames[currentPlayer] + '이(가) ' + treasureEmojis[currentPlayer] +
+            ' 보물을 찾았습니다!\n총 ' + stepCount + '걸음 이동!';
+        document.getElementById('foundModal').classList.add('show');
+    }, 1200);
+}
+
+// ═══════════════════════════════════════
+//  파티클
+// ═══════════════════════════════════════
+function spawnParticles() {
+    const emojis = ['🎉', '✨', '🌟', '💫', '🎊', '⭐', '🎆'];
+    for (let i = 0; i < 30; i++) {
+        setTimeout(() => {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            p.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+            p.style.left = Math.random() * 100 + 'vw';
+            p.style.top = '-20px';
+            p.style.animationDuration = (1.5 + Math.random()) + 's';
+            document.body.appendChild(p);
+            setTimeout(() => p.remove(), 3000);
+        }, i * 80);
+    }
+}
+
+// ═══════════════════════════════════════
+//  모달 & 로비
+// ═══════════════════════════════════════
+function closeFoundModal() {
+    document.getElementById('foundModal').classList.remove('show');
+    goBack();
+}
+function closeBonusModal() {
+    document.getElementById('bonusModal').classList.remove('show');
+}
+
+function goBack() {
+    if (walkAnimation) { clearTimeout(walkAnimation); walkAnimation = null; }
+    isWalking = false;
+    document.getElementById('gameView').style.display = 'none';
+    document.getElementById('lobby').style.display = 'flex';
+    if (map) { map.remove(); map = null; }
+    playerMarker = null; treasureMarker = null; radiusCircle = null; hintCircle = null;
+    pathLine = null; footprints = [];
+    updateLobbyUI();
+}
+
+function updateLobbyUI() {
+    const btns = document.querySelectorAll('.player-btn');
+    let found = 0;
+    players.forEach((p, i) => { if (p.found) { btns[i].classList.add('found'); found++; } });
+    document.getElementById('progressText').textContent = `보물 발견: ${found} / 4`;
+    if (found === 4) document.getElementById('bonusBtn').classList.add('active');
+}
+
+function showBonus() {
+    spawnParticles();
+    document.getElementById('bonusModal').classList.add('show');
+}
+
+// ═══════════════════════════════════════
+//  초기화
+// ═══════════════════════════════════════
+initTreasures();
+</script>
+
+</body>
+</html>
